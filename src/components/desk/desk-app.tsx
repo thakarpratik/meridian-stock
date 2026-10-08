@@ -220,7 +220,7 @@ export function DeskApp({ initial }: { initial: Desk }) {
                   ? "Five day-trade picks. Each one can move. Trigger is the opening-range high, and only above VWAP. No new entry after 15:10. Flat by 15:50."
                   : "Day longs only on names that can move: a wide typical day, a coil, or a session already running. Trigger is the opening-range high, and only above VWAP. No new entry after 15:10. Flat by 15:50."
                 : filter === "picks"
-                  ? "Five pullbacks you can enter. The trigger is the 20-day, or the 50-day if that is already lost. It is set at the last close and does not change during the day. Buy only when price is in that zone."
+                  ? "Five pullbacks you can enter. The trigger is the 20-day, or the 50-day if that is already lost. A buy also has to clear the week's headlines. Earnings, a downgrade, a guidance cut, or a lawsuit keeps it a wait."
                   : "Pullbacks only, from small-cap up. The entry is the 20-day average from the last close. A buy means price is in that zone now. Quiet names are not buys. Penny stocks and parabolic spikes stay out."}
             </p>
           </div>
@@ -281,7 +281,7 @@ export function DeskApp({ initial }: { initial: Desk }) {
             {mode === "swing" ? (
               <p className="mt-2 text-sm text-muted-foreground">
                 {filter === "picks"
-                  ? "Same five all session. The trigger, stop, and target do not move. Buy only if the live price is in the zone. Open Can move for the rest."
+                  ? "Same five all session. The trigger, stop, and target do not move. A buy is withheld when the week's news can gap the stop."
                   : `${moverCount} names can move. Quiet stocks are off Can move until you pick All.`}
               </p>
             ) : (
@@ -765,6 +765,7 @@ function PlanCard({
         </div>
 
         <p className="mt-3 text-sm text-foreground">{plan.location}</p>
+        {plan.newsNote ? <p className="mt-2 text-sm text-muted-foreground">{plan.newsNote}</p> : null}
 
         <dl className="mt-4 grid grid-cols-3 gap-2">
           <Level label="Trigger" value={plan.trigger} tone="ink" />

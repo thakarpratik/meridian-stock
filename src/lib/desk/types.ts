@@ -41,6 +41,9 @@ export type Plan = {
   move: MoveKind;
   moveNote: string;
   spark: { t: number; c: number }[];
+  /** Set when a chart buy was checked against the week's headlines. */
+  newsNote?: string | null;
+  newsBlock?: boolean;
 };
 
 export type DayTrade = {

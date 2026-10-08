@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { analyze } from "./analyze";
+import { checkHeadlines } from "./news";
 import { analyzeSession, spySessionLine } from "./session";
 import type { Bar, DayBook, DayTrade, Desk, Plan, Reject } from "./types";
 import { BOOK } from "./universe";
@@ -194,7 +195,14 @@ async function buildDayBook(): Promise<DayBook> {
       atrPct: plan?.atrPct ?? null,
       coiled: plan?.move === "coiled",
     });
-    if (trade) trades.push(trade);
+    if (!trade) continue;
+    if (plan?.newsBlock && trade.stance === "buy") {
+      trade.stance = "wait";
+      trade.location = plan.newsNote ?? "A headline blocks a new long.";
+      trade.flatTitle = "News blocks the buy";
+      trade.why = plan.newsNote ?? trade.why;
+    }
+    trades.push(trade);
   }
   if (trades.length < 12) {
     throw new Error("Not enough intraday prices to build the day book. Try again.");
@@ -375,6 +383,19 @@ async function buildDesk(): Promise<Desk> {
   if (plans.length < 15) {
     throw new Error("Not enough prices came back to build the desk. Try refresh.");
   }
+
+  const chartBuys = plans.filter((plan) => plan.stance === "buy" && plan.move !== "steady");
+  await mapPool(chartBuys, 6, async (plan) => {
+    const check = await checkHeadlines(plan.symbol, plan.name, now);
+    plan.newsNote = check.note;
+    plan.newsBlock = check.blocksBuy;
+    if (!check.blocksBuy) return;
+    plan.stance = "wait";
+    plan.location = check.note;
+    plan.holdTitle = "News blocks the buy";
+    plan.holdDetail = `${check.note} The pullback level is still ${plan.trigger == null ? "unset" : `$${plan.trigger.toFixed(2)}`}. Do not buy it while this headline is the story.`;
+    plan.why = check.note;
+  });
 
   const sorted = sortPlans(plans);
   const movers = sorted.filter((plan) => plan.move !== "steady");
