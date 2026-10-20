@@ -220,8 +220,8 @@ export function DeskApp({ initial }: { initial: Desk }) {
                   ? "Five day-trade picks. Each one can move. Trigger is the opening-range high, and only above VWAP. No new entry after 15:10. Flat by 15:50."
                   : "Day longs only on names that can move: a wide typical day, a coil, or a session already running. Trigger is the opening-range high, and only above VWAP. No new entry after 15:10. Flat by 15:50."
                 : filter === "picks"
-                  ? "Five pullbacks you can enter. The trigger is the 20-day, or the 50-day if that is already lost. A buy also has to clear the week's headlines. Earnings, a downgrade, a guidance cut, or a lawsuit keeps it a wait."
-                  : "Pullbacks only, from small-cap up. The entry is the 20-day average from the last close. A buy means price is in that zone now. Quiet names are not buys. Penny stocks and parabolic spikes stay out."}
+                  ? "Five names that can turn. The buy is not the moving average. A day has to tag the 20-day, and you buy only through that day's high. A headline can still veto it."
+                  : "A buy is a turn, not a dip. Price has to tag the 20-day, then trade back through that day's high. Quiet names are not buys. Penny stocks and parabolic spikes stay out."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -281,7 +281,7 @@ export function DeskApp({ initial }: { initial: Desk }) {
             {mode === "swing" ? (
               <p className="mt-2 text-sm text-muted-foreground">
                 {filter === "picks"
-                  ? "Same five all session. The trigger, stop, and target do not move. A buy is withheld when the week's news can gap the stop."
+                  ? "Same five all session. Buy only through the turn high, not on the average. A headline can still keep it a wait."
                   : `${moverCount} names can move. Quiet stocks are off Can move until you pick All.`}
               </p>
             ) : (
@@ -401,14 +401,12 @@ export function DeskApp({ initial }: { initial: Desk }) {
       <footer className="mt-10 border-t border-border pt-5 text-sm text-muted-foreground">
         <p>
           The book is {desk.scanned} liquid US names, from small-cap through large-cap. The screen opens on
-          five pullbacks: a name that can move, with the entry at the 20-day (or the 50-day if the 20-day
-          is already lost). Those levels come from the last completed close and stay put through the
-          session. {desk.charted} priced today. {desk.qualified.length} still clear $300 million and $10.{" "}
-          {desk.removed} were removed for size, a penny past, thin dollar volume, a parabolic spike, or a
-          missing chart. A buy means the live price is in the pullback zone, the typical day is at least
-          3.5% or the name is coiled, and the target pays at least 1.8. Do not chase above the zone. Day
-          trades still use the opening-range high, above VWAP, no new entry after 15:10 ET, and flat by
-          15:50.
+          five names that can turn. A daily low has to tag the 20-day, and the buy is a trade back through
+          that day's high, not the average. {desk.charted} priced today. {desk.qualified.length} still clear
+          $300 million and $10. {desk.removed} were removed for size, a penny past, thin dollar volume, a
+          parabolic spike, or a missing chart. A buy also needs a typical day of at least 3.5% or a coil,
+          a target of at least 1.8, and a clear headline. Do not buy the dip. Day trades still use the
+          opening-range high, above VWAP, no new entry after 15:10 ET, and flat by 15:50.
         </p>
         <p className="mt-3">
           Meridian is a mechanical checklist, not a broker and not advice. Prices gap through
@@ -466,7 +464,7 @@ function pickHeadline(mode: "swing" | "day", shown: number): string {
   const noun = shown === 1 ? "name" : "names";
   return mode === "day"
     ? `${shown} ${noun} to pick today. A live buy ranks first.`
-    : `${shown} ${noun}. A pullback in the zone ranks first. Levels stay at the last close.`;
+    : `${shown} ${noun}. A turn that is live ranks first. Do not buy the dip.`;
 }
 
 function nearTrigger(distance: number | null): number {
@@ -479,7 +477,7 @@ function rankSwingPicks(plans: Plan[]): Plan[] {
   const eligible = plans.filter((plan) => plan.move !== "steady" && plan.stance !== "pass" && plan.trigger != null);
   const closeEnough = eligible.filter((plan) => {
     const distance = plan.distancePct ?? 99;
-    return distance <= 1.5 && distance >= -6;
+    return distance <= 3 && distance >= -1.5;
   });
   const pool = closeEnough.length > 0 ? closeEnough : eligible;
   return [...pool]

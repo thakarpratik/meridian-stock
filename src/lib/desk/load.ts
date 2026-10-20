@@ -55,18 +55,21 @@ async function fetchChart(symbol: string): Promise<ChartPack | null> {
     const result = json.chart?.result?.[0];
     if (!result?.timestamp || !result.indicators?.quote?.[0]) return null;
     const quote = result.indicators.quote[0];
+    const meta = result.meta ?? {};
     const bars: Bar[] = [];
     for (let i = 0; i < result.timestamp.length; i++) {
       const o = quote.open?.[i];
       const h = quote.high?.[i];
       const l = quote.low?.[i];
-      const c = quote.close?.[i];
+      let c = quote.close?.[i];
       const v = quote.volume?.[i];
+      if ((c == null || c <= 0) && i === result.timestamp.length - 1 && meta.regularMarketPrice && meta.regularMarketPrice > 0) {
+        c = meta.regularMarketPrice;
+      }
       if (o == null || h == null || l == null || c == null || v == null || c <= 0) continue;
       bars.push({ t: result.timestamp[i]! * 1000, o, h, l, c, v });
     }
     if (bars.length < 50) return null;
-    const meta = result.meta ?? {};
     if (meta.instrumentType && meta.instrumentType !== "EQUITY" && symbol !== "SPY") return null;
     const live = meta.regularMarketPrice;
     return {

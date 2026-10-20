@@ -215,13 +215,26 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
     return { ok: true, plan };
   }
 
-  // One entry: a pullback to the 20-day, or to the 50-day if the 20-day is already lost.
-  // The level is the last completed close. It does not move during the session.
+  // The average is not the buy. A day has to tag it first. The buy is a later
+  // trade back through that day's high, so the entry is the turn, not the dip.
   const deep = price < s20 * 0.995;
+  const anchorPx = deep ? s50 : s20;
   const anchor = deep ? "50-day" : "20-day";
-  const trigger = roundPx(deep ? s50 : s20);
-  const zoneHigh = roundPx(trigger * 1.015);
-  const stop = chooseStop(trigger, [low5, low8, swingLow, s50, trigger - atr14 * 1.5, trigger - atr14 * 2]);
+  let tag: Bar | null = null;
+  for (let i = last; i >= Math.max(0, last - 3); i--) {
+    const bar = bars[i]!;
+    if (bar.l <= anchorPx * 1.01 && bar.l >= anchorPx * 0.98) {
+      tag = bar;
+      break;
+    }
+  }
+  const trigger = roundPx(tag ? tag.h : anchorPx);
+  const rawCeiling = tag ? Math.min(trigger * 1.008, trigger + atr14 * 0.35) : trigger * 1.015;
+  const zoneHigh = rawCeiling > trigger ? roundPx(rawCeiling) : roundPx(trigger + Math.max(0.01, trigger * 0.003));
+  const stop = chooseStop(
+    trigger,
+    [tag?.l ?? 0, low5, low8, swingLow, s50, trigger - atr14 * 1.5, trigger - atr14 * 2],
+  );
   if (stop == null) {
     const below = [low5, low8, swingLow, s50].filter((level) => level < trigger);
     const nearest = below.length ? Math.max(...below) : trigger * 0.95;
@@ -260,31 +273,37 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
   }
 
   const trendLine = `${symbol} is in an uptrend: the last close is above a 50-day ($${roundPx(s50)}) that sits above a rising 200-day ($${roundPx(s200)}). RSI is ${Math.round(rsi14)}.`;
-  const inZone = live <= zoneHigh && live >= trigger * 0.995;
+  const inZone = tag != null && live >= trigger && live <= zoneHigh;
   let stance: Stance;
   let location: string;
   let holdTitle: string;
   let holdDetail: string;
   let why: string;
 
-  if (inZone) {
+  if (tag == null) {
+    stance = "wait";
+    location = `No tag of the ${anchor} in the last four sessions. Do not buy this price. The pullback has to touch ${money(roundPx(anchorPx))} first.`;
+    holdTitle = "Wait for the average to be tagged";
+    holdDetail = `There is no buy until a daily low tags the ${anchor}, and then only on a trade back through that day's high. If you already hold shares, invalidation is ${money(invalidation)} and the measured target is ${money(target)}. Do not add here.`;
+    why = `${trendLine} Price has not tagged the ${anchor}. Buying above a moving average that has not been tested is how these fills go red.`;
+  } else if (inZone) {
     stance = "buy";
-    location = `Pullback is here. Enter at the ${anchor} ${money(trigger)}, and do not pay above ${money(zoneHigh)}.`;
-    holdTitle = "Enter the pullback";
-    holdDetail = `Buy only from ${money(trigger)} to ${money(zoneHigh)}. Hold while daily closes stay above ${money(invalidation)}. Sell at ${money(target)}. The entry was set at the last close and does not move today. Do not average down.`;
-    why = `${trendLine} The buy is a pullback to the ${anchor}, not a breakout. Live price is in that zone.`;
+    location = `The ${anchor} was tagged. Buy only through the turn at ${money(trigger)}, and do not pay above ${money(zoneHigh)}.`;
+    holdTitle = "Buy the turn, not the dip";
+    holdDetail = `Buy only from ${money(trigger)} to ${money(zoneHigh)}. That is the high of the day that tagged the ${anchor}, not the average itself. Hold while daily closes stay above ${money(invalidation)}. Sell at ${money(target)}. Do not average down.`;
+    why = `${trendLine} The low tagged the ${anchor} and the buy is a trade back through ${money(trigger)}. Paying the average while it is still falling is not the entry.`;
   } else if (live > zoneHigh) {
     stance = "wait";
-    location = `Pullback entry is the ${anchor} at ${money(trigger)}, ${Math.abs(pct(trigger, live)).toFixed(1)}% under the live price. Do not chase.`;
-    holdTitle = "Wait for the pullback";
-    holdDetail = `Do not buy this price. The only entry is ${money(trigger)} to ${money(zoneHigh)}. That level is locked to the last close for the rest of the session. If you already hold shares, keep them toward ${money(target)} only while closes stay above ${money(invalidation)}. Do not add up here.`;
-    why = `${trendLine} It has not pulled back to the ${anchor} at ${money(trigger)}. Buying the live price is a chase.`;
+    location = `The turn at ${money(trigger)} already passed. Do not chase. The next buy is a fresh tag of the ${anchor}.`;
+    holdTitle = "Too late for this turn";
+    holdDetail = `Do not buy this price. This turn was ${money(trigger)} to ${money(zoneHigh)}, and price is through it. If you already hold shares, keep them toward ${money(target)} only while closes stay above ${money(invalidation)}. Do not add.`;
+    why = `${trendLine} The tag happened and the turn-high at ${money(trigger)} is behind. The desk does not pay up after the turn.`;
   } else {
     stance = "wait";
-    location = `Live price is under the ${anchor} at ${money(trigger)}. Do not catch the dip. Enter only back inside ${money(trigger)} to ${money(zoneHigh)}.`;
-    holdTitle = "Wait for the pullback to hold";
-    holdDetail = `Do not buy under ${money(trigger)}. The entry is back at the ${anchor}. If you already hold shares, invalidation is ${money(invalidation)} and the target is ${money(target)}.`;
-    why = `${trendLine} Price slipped through the ${anchor}. The plan does not catch a falling pullback.`;
+    location = `The ${anchor} was tagged. Do not buy the dip. Buy only through ${money(trigger)}.`;
+    holdTitle = "Wait for the turn";
+    holdDetail = `The average is not the order. Buy only if price trades through ${money(trigger)}, and not above ${money(zoneHigh)}. If you already hold shares, invalidation is ${money(invalidation)} and the target is ${money(target)}. Do not add under the turn.`;
+    why = `${trendLine} A day tagged the ${anchor}, and price is still under that day's high at ${money(trigger)}. That is a wait, not a buy.`;
   }
 
   if (live <= invalidation) {
@@ -303,7 +322,7 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
 
   if (stance === "buy" && move === "steady") {
     stance = "wait";
-    location = `Pullback is at ${money(trigger)}, but a typical day is only ${atrPct}%. Too quiet to buy.`;
+    location = `The turn is at ${money(trigger)}, but a typical day is only ${atrPct}%. Too quiet to buy.`;
     holdTitle = "Not enough movement";
     holdDetail = `This desk buys a pullback only when a typical day is at least 3.5%, or price is coiled against the 20-day high. This one is ${atrPct}%. Do not buy it for a move. If you already hold it, invalidation is still ${money(invalidation)} and the target is ${money(target)}.`;
     why = `${trendLine} The ${anchor} is tagged, but the range is ordinary. Quiet stocks are not buys.`;
