@@ -31,6 +31,8 @@ export type Plan = {
   holdDetail: string;
   riskPct: number | null;
   rr: number | null;
+  /** Room from the live price to the target, in percent. */
+  upsidePct: number | null;
   distancePct: number | null;
   rsi: number;
   trend: "up" | "mixed" | "down";

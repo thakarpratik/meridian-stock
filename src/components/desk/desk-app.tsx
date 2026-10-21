@@ -789,6 +789,7 @@ function PlanCard({
             <Mini label="RSI" value={String(plan.rsi)} />
             <Mini label="Risk" value={plan.riskPct == null ? "—" : `${plan.riskPct}%`} />
             <Mini label="Payoff" value={plan.rr == null ? "—" : `${plan.rr.toFixed(1)}×`} />
+            <Mini label="To target" value={plan.upsidePct == null ? "—" : `${plan.upsidePct}%`} />
             <Mini
               label="Distance"
               value={plan.distancePct == null ? "—" : `${plan.distancePct > 0 ? "+" : ""}${plan.distancePct}%`}

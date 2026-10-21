@@ -12,3 +12,4 @@ attachments
 .grok
 .project_id
 
+.env*

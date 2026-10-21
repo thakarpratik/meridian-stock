@@ -422,7 +422,7 @@ async function buildDesk(): Promise<Desk> {
   };
 }
 
-async function getDesk(force: boolean): Promise<Desk> {
+export async function getDesk(force: boolean): Promise<Desk> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.desk;
   if (!force && inflight) return inflight;
   const run = buildDesk()

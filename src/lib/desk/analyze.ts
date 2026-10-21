@@ -6,6 +6,8 @@ const MIN_DOLLAR_VOL = 8_000_000;
 const MIN_RISK = 0.015;
 const MAX_RISK = 0.09;
 const MIN_RR = 1.8;
+/** A buy needs this much room from the live price to the target. */
+const MIN_UPSIDE = 0.1;
 
 export type AnalyzeInput = {
   symbol: string;
@@ -210,6 +212,7 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
       holdDetail: `Pass. Do not buy. If you already own it, this swing plan says exit — especially on a close under ${money(invalidation)}. That is not a view on a multi-year investment.`,
       riskPct: null,
       rr: null,
+      upsidePct: null,
       distancePct: null,
     };
     return { ok: true, plan };
@@ -328,6 +331,16 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
     why = `${trendLine} The ${anchor} is tagged, but the range is ordinary. Quiet stocks are not buys.`;
   }
 
+  const upside = (target - live) / live;
+  if (stance === "buy" && upside < MIN_UPSIDE) {
+    const room = (upside * 100).toFixed(1);
+    stance = "wait";
+    location = `The turn is at ${money(trigger)}, but the target at ${money(target)} is only ${room}% away. Too little room to buy.`;
+    holdTitle = "Not enough room to target";
+    holdDetail = `This desk buys only when the target is at least ${MIN_UPSIDE * 100}% above the price paid. This one is ${room}%. Do not buy it for the move. If you already hold it, invalidation is still ${money(invalidation)} and the target is ${money(target)}.`;
+    why = `${trendLine} The ${anchor} is tagged, but ${money(target)} is only ${room}% above ${money(live)}. A small gap is not a buy.`;
+  }
+
   return {
     ok: true,
     plan: {
@@ -342,6 +355,7 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
       holdDetail,
       riskPct: Math.round(riskFrac * 1000) / 10,
       rr: Math.round(rr * 10) / 10,
+      upsidePct: Math.round(upside * 1000) / 10,
       distancePct: Math.round(pct(price, trigger) * 10) / 10,
     },
   };
@@ -370,6 +384,7 @@ function passRisk(
     | "holdDetail"
     | "riskPct"
     | "rr"
+    | "upsidePct"
     | "distancePct"
   >,
   why: string,
@@ -387,6 +402,7 @@ function passRisk(
     holdDetail: `No entry. If you already own it, invalidation is ${money(invalidation)} — a close through that line ends the swing. Do not average down.`,
     riskPct: null,
     rr: null,
+    upsidePct: null,
     distancePct: null,
   };
 }

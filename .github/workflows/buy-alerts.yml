@@ -1,0 +1,54 @@
+name: Buy alerts
+
+# Every 15 minutes on weekdays, 13:00–21:45 UTC. That spans the 9:30–16:00 ET
+# session in both EST and EDT; the script skips runs outside it.
+on:
+  schedule:
+    - cron: "*/15 13-21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Check even outside market hours"
+        type: boolean
+        default: false
+
+concurrency:
+  group: buy-alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/buy-alerts.mjs
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Restore what was already sent
+        uses: actions/cache/restore@v4
+        with:
+          path: .alert-state
+          key: buy-alerts-${{ github.run_id }}
+          restore-keys: buy-alerts-
+
+      - name: Check the desk and push new buys
+        id: check
+        env:
+          ALERTS_URL: https://claude-premarket-screener.vercel.app/api/alerts
+          SITE_URL: https://claude-premarket-screener.vercel.app
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FORCE: ${{ inputs.force && '1' || '0' }}
+        run: node scripts/buy-alerts.mjs
+
+      - name: Save what was sent
+        if: always() && steps.check.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .alert-state
+          key: buy-alerts-${{ github.run_id }}
