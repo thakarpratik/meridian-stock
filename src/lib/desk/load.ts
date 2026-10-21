@@ -100,7 +100,7 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
   return out;
 }
 
-async function fetchIntraday(symbol: string): Promise<{ name: string; bars: Bar[] } | null> {
+export async function fetchIntraday(symbol: string): Promise<{ name: string; bars: Bar[] } | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=5m&includePrePost=false`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 9000);
