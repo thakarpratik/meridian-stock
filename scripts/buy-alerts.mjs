@@ -10,7 +10,7 @@
  *   lowest price since, and push once price recovers a quarter of the stock's
  *   typical daily range off that low — a lower entry than the signal.
  *   A watched setup is dropped if price trades through the stop, the room to
- *   target shrinks under 10%, or the next session ends without a bounce.
+ *   target shrinks under 8%, or the next session ends without a bounce.
  *
  * A setup is its symbol plus trigger, so a fresh pullback on the same stock
  * gets a new trigger and alerts again. What was sent and what is being watched
@@ -31,7 +31,7 @@ const KEEP_MS = 10 * 24 * 60 * 60 * 1000;
 /** Bounce needed off the low, as a share of a typical day's range. */
 const BOUNCE_OF_DAY = 0.25;
 /** Same floor the desk uses before it calls a buy. */
-const MIN_UPSIDE = 0.1;
+const MIN_UPSIDE = 0.08;
 /** Watch through the signal's session and the next one. */
 const WATCH_SESSIONS = 2;
 const BAR_MS = 5 * 60 * 1000;
@@ -238,7 +238,7 @@ async function main() {
     if (price >= low + bounce) {
       if ((setup.target - price) / price < MIN_UPSIDE) {
         drop();
-        console.log(`Dropped ${key}: bounced to ${money(price)}, but under 10% is left to ${money(setup.target)}.`);
+        console.log(`Dropped ${key}: bounced to ${money(price)}, but under ${Math.round(MIN_UPSIDE * 100)}% is left to ${money(setup.target)}.`);
         continue;
       }
       if (await send(key, bouncePush(setup, price))) {

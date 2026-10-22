@@ -7,7 +7,7 @@ const MIN_RISK = 0.015;
 const MAX_RISK = 0.09;
 const MIN_RR = 1.8;
 /** A buy needs this much room from the live price to the target. */
-const MIN_UPSIDE = 0.1;
+const MIN_UPSIDE = 0.08;
 
 export type AnalyzeInput = {
   symbol: string;
@@ -337,7 +337,7 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
     stance = "wait";
     location = `The turn is at ${money(trigger)}, but the target at ${money(target)} is only ${room}% away. Too little room to buy.`;
     holdTitle = "Not enough room to target";
-    holdDetail = `This desk buys only when the target is at least ${MIN_UPSIDE * 100}% above the price paid. This one is ${room}%. Do not buy it for the move. If you already hold it, invalidation is still ${money(invalidation)} and the target is ${money(target)}.`;
+    holdDetail = `This desk buys only when the target is at least ${Math.round(MIN_UPSIDE * 100)}% above the price paid. This one is ${room}%. Do not buy it for the move. If you already hold it, invalidation is still ${money(invalidation)} and the target is ${money(target)}.`;
     why = `${trendLine} The ${anchor} is tagged, but ${money(target)} is only ${room}% above ${money(live)}. A small gap is not a buy.`;
   }
 
