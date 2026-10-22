@@ -1,10 +1,11 @@
 name: Buy alerts
 
-# Every 15 minutes on weekdays, 13:00–21:45 UTC. That spans the 9:30–16:00 ET
-# session in both EST and EDT; the script skips runs outside it.
+# Every 15 minutes on weekdays, 13:00–21:59 UTC. That spans the 9:30–16:00 ET
+# session in both EST and EDT; the script skips runs outside it. Off the :00
+# and :15 marks, where GitHub delays or drops the most scheduled runs.
 on:
   schedule:
-    - cron: "*/15 13-21 * * 1-5"
+    - cron: "4,19,34,49 13-21 * * 1-5"
   workflow_dispatch:
     inputs:
       force:
