@@ -101,29 +101,47 @@ async function readState() {
 
 const money = (n) => (n == null ? "—" : `$${n.toFixed(2)}`);
 
+const PUSH_TRIES = 3;
+
 async function push({ title, message }) {
-  const response = await fetch(ntfyUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      topic,
-      title,
-      message,
-      tags: ["chart_with_upwards_trend"],
-      priority: 4,
-      ...(siteUrl ? { click: siteUrl } : {}),
-    }),
-  });
-  if (!response.ok) throw new Error(`ntfy answered ${response.status}`);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await fetch(ntfyUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          topic,
+          title,
+          message,
+          tags: ["chart_with_upwards_trend"],
+          priority: 4,
+          ...(siteUrl ? { click: siteUrl } : {}),
+        }),
+      });
+      if (!response.ok) throw new Error(`ntfy answered ${response.status}`);
+      return;
+    } catch (error) {
+      // A blip here would otherwise hold the alert until the next 15-minute run.
+      if (attempt >= PUSH_TRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+    }
+  }
 }
 
-function signalPush(buy) {
+const etClock = (iso) =>
+  new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(
+    iso ? new Date(iso) : new Date(),
+  );
+
+function signalPush(buy, asOf) {
+  const zone = buy.zoneHigh ?? buy.trigger;
   return {
     title: `BUY ${buy.symbol} at ${money(buy.price)} → ${money(buy.target)} (+${buy.upsidePct}%)`,
     message: [
       buy.name,
-      `Buy through ${money(buy.trigger)}. Stop on a close under ${money(buy.invalidation)}.`,
-      `Target ${money(buy.target)}. Risk ${buy.riskPct}%, reward ${buy.rr}× risk.`,
+      `Buy zone ${money(buy.trigger)}–${money(zone)}. Do not pay above ${money(zone)}; zones like this often last only minutes.`,
+      `Stop on a close under ${money(buy.invalidation)}. Target ${money(buy.target)}. Risk ${buy.riskPct}%, reward ${buy.rr}× risk.`,
+      `Price as of ${etClock(asOf)} ET.`,
     ].join("\n"),
   };
 }
@@ -137,8 +155,9 @@ function bouncePush(setup, price) {
     message: [
       setup.name,
       `Retest entry. The signal was ${money(setup.signalPrice)}; price fell to ${money(setup.low)} and turned up.`,
+      `This is under the ${money(setup.trigger)} trigger, so the app shows WAIT for it.`,
       `Stop on a close under ${money(setup.invalidation)}. Target ${money(setup.target)}.`,
-      `Risk ${risk.toFixed(1)}%, reward ${rr.toFixed(1)}× risk.`,
+      `Risk ${risk.toFixed(1)}%, reward ${rr.toFixed(1)}× risk. Price as of ${etClock()} ET.`,
     ].join("\n"),
   };
 }
@@ -164,7 +183,7 @@ async function main() {
   if (watchSymbols.length) url.searchParams.set("watch", watchSymbols.join(","));
   const response = await fetch(url, { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-  const { buys, tape = {} } = await response.json();
+  const { asOf, buys, tape = {} } = await response.json();
 
   const send = async (key, note) => {
     try {
@@ -200,7 +219,9 @@ async function main() {
       console.log(`Holding ${key}: still falling at ${money(buy.price)}. Waiting for a bounce.`);
       continue;
     }
-    if (await send(key, signalPush(buy))) console.log(`Pushed ${key} (+${buy.upsidePct}%).`);
+    if (await send(key, signalPush(buy, asOf))) {
+      console.log(`Pushed ${key} at ${money(buy.price)}, zone to ${money(buy.zoneHigh)} (+${buy.upsidePct}%).`);
+    }
   }
 
   for (const [key, setup] of Object.entries(watching)) {

@@ -206,6 +206,7 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
       why,
       location: down ? "Below the 200-day." : "Trend is mixed.",
       trigger: null,
+      zoneHigh: null,
       invalidation,
       target: null,
       holdTitle: "Do not hold this swing",
@@ -349,6 +350,7 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
       why,
       location,
       trigger,
+      zoneHigh: tag ? zoneHigh : null,
       invalidation,
       target,
       holdTitle,
@@ -378,6 +380,7 @@ function passRisk(
     | "why"
     | "location"
     | "trigger"
+    | "zoneHigh"
     | "invalidation"
     | "target"
     | "holdTitle"
@@ -396,6 +399,7 @@ function passRisk(
     why,
     location: "Uptrend, but the levels do not pay.",
     trigger: null,
+    zoneHigh: null,
     invalidation,
     target: null,
     holdTitle: "Do not hold this swing",

@@ -25,6 +25,8 @@ export type Plan = {
   why: string;
   location: string;
   trigger: number | null;
+  /** Top of the buy zone, once a day has tagged the average. */
+  zoneHigh: number | null;
   invalidation: number;
   target: number | null;
   holdTitle: string;

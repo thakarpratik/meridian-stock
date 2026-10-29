@@ -4,6 +4,8 @@ import { fetchIntraday, getDesk } from "@/lib/desk/load";
 import { BOOK_BY_SYMBOL } from "@/lib/desk/universe";
 
 const MAX_WATCH = 20;
+/** Buy zones are under 1% wide, so the alert job reads prices at most this old. */
+const MAX_AGE_MS = 2 * 60 * 1000;
 
 /**
  * Armed swing buys as JSON, for the scheduled alert job
@@ -19,7 +21,7 @@ export const Route = createFileRoute("/api/alerts")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const desk = await getDesk(false);
+        const desk = await getDesk(false, MAX_AGE_MS);
         const buys = desk.plans
           .filter((plan) => plan.stance === "buy" && plan.move !== "steady")
           .map((plan) => ({
@@ -27,6 +29,7 @@ export const Route = createFileRoute("/api/alerts")({
             name: plan.name,
             price: plan.price,
             trigger: plan.trigger,
+            zoneHigh: plan.zoneHigh,
             invalidation: plan.invalidation,
             target: plan.target,
             upsidePct: plan.upsidePct,

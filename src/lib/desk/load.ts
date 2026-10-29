@@ -422,8 +422,9 @@ async function buildDesk(): Promise<Desk> {
   };
 }
 
-export async function getDesk(force: boolean): Promise<Desk> {
-  if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.desk;
+/** `maxAgeMs` lets a caller that needs live zones (the alert job) accept less cache age. */
+export async function getDesk(force: boolean, maxAgeMs = TTL_MS): Promise<Desk> {
+  if (!force && cache && Date.now() - cache.at < maxAgeMs) return cache.desk;
   if (!force && inflight) return inflight;
   const run = buildDesk()
     .then((desk) => {
