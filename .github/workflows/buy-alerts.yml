@@ -51,7 +51,7 @@ jobs:
       - name: Build the desk and push new buys
         id: check
         env:
-          SITE_URL: ${{ vars.SITE_URL }}
+          SITE_URL: https://claude.ai/artifact/LH43akbDX4au6rEwCKn56c
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           FORCE: ${{ inputs.force && '1' || '0' }}
           SNAPSHOT_FILE: out/desk.json
