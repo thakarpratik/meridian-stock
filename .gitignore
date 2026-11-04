@@ -13,3 +13,5 @@ attachments
 .project_id
 
 .env*
+out/
+dist-static/

@@ -1,15 +1,19 @@
 name: Buy alerts
 
 # Every 15 minutes on weekdays, 13:00–21:59 UTC. That spans the 9:30–16:00 ET
-# session in both EST and EDT; the script skips runs outside it. Off the :00
-# and :15 marks, where GitHub delays or drops the most scheduled runs.
+# session in both EST and EDT; the alert script skips runs outside it. Off the
+# :00 and :15 marks, where GitHub delays or drops the most scheduled runs.
+#
+# Each run also saves a desk snapshot (desk.json) to the desk-data branch. The
+# Claude-hosted copy of the app reads that file, so the early runs before the
+# open give it the levels from the last close.
 on:
   schedule:
     - cron: "4,19,34,49 13-21 * * 1-5"
   workflow_dispatch:
     inputs:
       force:
-        description: "Check even outside market hours"
+        description: "Check alerts even outside market hours"
         type: boolean
         default: false
 
@@ -17,14 +21,20 @@ concurrency:
   group: buy-alerts
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: scripts/buy-alerts.mjs
+          sparse-checkout: |
+            scripts/buy-alerts.mjs
+            scripts/desk-job.ts
+            src/lib/desk
           sparse-checkout-cone-mode: false
 
       - uses: actions/setup-node@v4
@@ -38,14 +48,14 @@ jobs:
           key: buy-alerts-${{ github.run_id }}
           restore-keys: buy-alerts-
 
-      - name: Check the desk and push new buys
+      - name: Build the desk and push new buys
         id: check
         env:
-          ALERTS_URL: https://claude-premarket-screener.vercel.app/api/alerts
-          SITE_URL: https://claude-premarket-screener.vercel.app
+          SITE_URL: ${{ vars.SITE_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           FORCE: ${{ inputs.force && '1' || '0' }}
-        run: node scripts/buy-alerts.mjs
+          SNAPSHOT_FILE: out/desk.json
+        run: npx -y tsx@4.20.3 scripts/desk-job.ts
 
       - name: Save what was sent
         if: always() && steps.check.outputs.changed == 'true'
@@ -53,3 +63,17 @@ jobs:
         with:
           path: .alert-state
           key: buy-alerts-${{ github.run_id }}
+
+      - name: Publish the snapshot to the desk-data branch
+        if: always()
+        run: |
+          [ -f out/desk.json ] || { echo "No snapshot this run."; exit 0; }
+          cd out
+          git init -q -b desk-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desk.json
+          git commit -q -m "Desk snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" desk-data
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
