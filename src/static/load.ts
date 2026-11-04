@@ -13,7 +13,7 @@ export function readSnapshot(force = false): Promise<Snapshot> {
   if (!latest || force) {
     latest = fetch(`./desk.json?t=${Date.now()}`, { cache: "no-store" })
       .then((response) => {
-        if (!response.ok) throw new Error("The desk snapshot did not load.");
+        if (!response.ok) throw new Error("No prices yet. The desk fills in after the next scheduled update.");
         return response.json() as Promise<Snapshot>;
       })
       .catch((error: unknown) => {
