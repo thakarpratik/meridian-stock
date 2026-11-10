@@ -1,21 +1,18 @@
 name: Buy alerts
 
-# Every 15 minutes on weekdays, 13:00–21:59 UTC. That spans the 9:30–16:00 ET
-# session in both EST and EDT; the alert script skips runs outside it. Off the
-# :00 and :15 marks, where GitHub delays or drops the most scheduled runs.
+# Desk snapshot only. Every 15 minutes on weekdays, 13:00–21:59 UTC, it saves
+# desk.json to the desk-data branch. The Claude-hosted copy of the app reads
+# that file, so the early runs before the open give it the levels from the
+# last close. Off the :00 and :15 marks, where GitHub delays or drops the most
+# scheduled runs.
 #
-# Each run also saves a desk snapshot (desk.json) to the desk-data branch. The
-# Claude-hosted copy of the app reads that file, so the early runs before the
-# open give it the levels from the last close.
+# Phone alerts no longer run here. They run on Vercel every two minutes
+# (/api/alert-run, called by cron-job.org) with stop-loss and target alerts.
+# NTFY_TOPIC is left unset below so this job does not push duplicates.
 on:
   schedule:
     - cron: "4,19,34,49 13-21 * * 1-5"
   workflow_dispatch:
-    inputs:
-      force:
-        description: "Check alerts even outside market hours"
-        type: boolean
-        default: false
 
 concurrency:
   group: buy-alerts
@@ -41,28 +38,10 @@ jobs:
         with:
           node-version: 22
 
-      - name: Restore what was already sent
-        uses: actions/cache/restore@v4
-        with:
-          path: .alert-state
-          key: buy-alerts-${{ github.run_id }}
-          restore-keys: buy-alerts-
-
-      - name: Build the desk and push new buys
-        id: check
+      - name: Build the desk snapshot
         env:
-          SITE_URL: https://claude.ai/artifact/LH43akbDX4au6rEwCKn56c
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          FORCE: ${{ inputs.force && '1' || '0' }}
           SNAPSHOT_FILE: out/desk.json
         run: npx -y tsx@4.20.3 scripts/desk-job.ts
-
-      - name: Save what was sent
-        if: always() && steps.check.outputs.changed == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .alert-state
-          key: buy-alerts-${{ github.run_id }}
 
       - name: Publish the snapshot to the desk-data branch
         if: always()

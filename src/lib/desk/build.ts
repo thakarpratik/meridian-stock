@@ -92,6 +92,110 @@ async function fetchChart(symbol: string): Promise<ChartPack | null> {
   }
 }
 
+type LiveQuote = { price: number; changePct: number; fiftyTwoWeekHigh?: number; fiftyTwoWeekLow?: number };
+
+/** Live prices for many symbols, 20 per request, from Yahoo's spark endpoint. */
+async function fetchLiveQuotes(symbols: string[]): Promise<Map<string, LiveQuote>> {
+  const out = new Map<string, LiveQuote>();
+  const chunks: string[][] = [];
+  for (let i = 0; i < symbols.length; i += 20) chunks.push(symbols.slice(i, i + 20));
+  await mapPool(chunks, 6, async (chunk) => {
+    const url = `https://query1.finance.yahoo.com/v7/finance/spark?symbols=${chunk.map(encodeURIComponent).join(",")}&range=1d&interval=5m`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 9000);
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json", "User-Agent": UA },
+        signal: controller.signal,
+      });
+      if (!response.ok) return;
+      const json = (await response.json()) as {
+        spark?: {
+          result?: Array<{
+            symbol: string;
+            response?: Array<{
+              meta?: {
+                regularMarketPrice?: number;
+                previousClose?: number;
+                chartPreviousClose?: number;
+                fiftyTwoWeekHigh?: number;
+                fiftyTwoWeekLow?: number;
+              };
+            }>;
+          }>;
+        };
+      };
+      for (const item of json.spark?.result ?? []) {
+        const meta = item.response?.[0]?.meta;
+        const price = meta?.regularMarketPrice;
+        if (!meta || !price || price <= 0) continue;
+        const prev = meta.previousClose ?? meta.chartPreviousClose;
+        out.set(item.symbol, {
+          price,
+          changePct: prev ? (price / prev - 1) * 100 : 0,
+          fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
+          fiftyTwoWeekLow: meta.fiftyTwoWeekLow,
+        });
+      }
+    } catch {
+      // Symbols missing here fall back to a full chart read.
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+  return out;
+}
+
+/**
+ * Daily charts kept for the rest of the session. Swing levels are locked to the
+ * last close, so during the session only the live price changes; the alert job
+ * runs every two minutes and refreshes prices in bulk instead of re-reading
+ * 340 one-year charts.
+ */
+const dailyCache = new Map<string, { key: string; chart: ChartPack }>();
+
+function dailyKey(now: Date): string {
+  const clock = nyClock(now);
+  return `${clock.ymd}|${clock.mins >= 16 * 60 ? "closed" : "open"}`;
+}
+
+async function loadDailyCharts(symbols: string[], now: Date, sessionOpen: boolean): Promise<Map<string, ChartPack | null>> {
+  const key = dailyKey(now);
+  const out = new Map<string, ChartPack | null>();
+  const cached = symbols.filter((symbol) => dailyCache.get(symbol)?.key === key);
+  const live = sessionOpen && cached.length ? await fetchLiveQuotes(cached) : new Map<string, LiveQuote>();
+  const missing: string[] = [];
+  for (const symbol of symbols) {
+    const hit = dailyCache.get(symbol);
+    if (hit?.key !== key) {
+      missing.push(symbol);
+      continue;
+    }
+    if (!sessionOpen) {
+      out.set(symbol, hit.chart);
+      continue;
+    }
+    const quote = live.get(symbol);
+    if (!quote) {
+      missing.push(symbol);
+      continue;
+    }
+    out.set(symbol, {
+      ...hit.chart,
+      price: quote.price,
+      changePct: quote.changePct,
+      fiftyTwoWeekHigh: Math.max(quote.fiftyTwoWeekHigh ?? 0, hit.chart.fiftyTwoWeekHigh, quote.price),
+      fiftyTwoWeekLow: Math.min(quote.fiftyTwoWeekLow ?? Infinity, hit.chart.fiftyTwoWeekLow, quote.price),
+    });
+  }
+  const fresh = await mapPool(missing, 14, async (symbol) => ({ symbol, chart: await fetchChart(symbol) }));
+  for (const { symbol, chart } of fresh) {
+    out.set(symbol, chart);
+    if (chart) dailyCache.set(symbol, { key, chart });
+  }
+  return out;
+}
+
 async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let cursor = 0;
@@ -322,13 +426,9 @@ function inRegularSession(now: Date): boolean {
 
 async function buildDesk(): Promise<Desk> {
   const symbols = [...BOOK.map((entry) => entry.symbol), "SPY"];
-  const charts = await mapPool(symbols, 14, async (symbol) => ({
-    symbol,
-    chart: await fetchChart(symbol),
-  }));
-  const bySymbol = new Map(charts.map((item) => [item.symbol, item.chart]));
   const now = new Date();
   const sessionOpen = inRegularSession(now);
+  const bySymbol = await loadDailyCharts(symbols, now, sessionOpen);
 
   const spy = bySymbol.get("SPY");
   let tape: Desk["tape"] = {
@@ -450,9 +550,10 @@ export async function getDesk(force: boolean, maxAgeMs = TTL_MS): Promise<Desk> 
   return run;
 }
 
-const MAX_WATCH = 20;
+/** Setups waiting for a bounce plus open positions with a stop. */
+const MAX_WATCH = 40;
 /** Buy zones are under 1% wide, so the alert job reads prices at most this old. */
-const ALERT_MAX_AGE_MS = 2 * 60 * 1000;
+const ALERT_MAX_AGE_MS = 60 * 1000;
 
 export type AlertsPayload = {
   asOf: string;

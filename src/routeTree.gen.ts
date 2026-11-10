@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiAlertRunRouteImport } from './routes/api/alert-run'
 import { Route as ApiAlertsRouteImport } from './routes/api/alerts'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAlertRunRoute = ApiAlertRunRouteImport.update({
+  id: '/api/alert-run',
+  path: '/api/alert-run',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAlertsRoute = ApiAlertsRouteImport.update({
@@ -25,27 +31,31 @@ const ApiAlertsRoute = ApiAlertsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/alert-run': typeof ApiAlertRunRoute
   '/api/alerts': typeof ApiAlertsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/alert-run': typeof ApiAlertRunRoute
   '/api/alerts': typeof ApiAlertsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/alert-run': typeof ApiAlertRunRoute
   '/api/alerts': typeof ApiAlertsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/alerts'
+  fullPaths: '/' | '/api/alert-run' | '/api/alerts'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/alerts'
-  id: '__root__' | '/' | '/api/alerts'
+  to: '/' | '/api/alert-run' | '/api/alerts'
+  id: '__root__' | '/' | '/api/alert-run' | '/api/alerts'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiAlertRunRoute: typeof ApiAlertRunRoute
   ApiAlertsRoute: typeof ApiAlertsRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/alert-run': {
+      id: '/api/alert-run'
+      path: '/api/alert-run'
+      fullPath: '/api/alert-run'
+      preLoaderRoute: typeof ApiAlertRunRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/alerts': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiAlertRunRoute: ApiAlertRunRoute,
   ApiAlertsRoute: ApiAlertsRoute,
 }
 export const routeTree = rootRouteImport
