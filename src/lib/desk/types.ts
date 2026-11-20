@@ -96,6 +96,8 @@ export type Desk = {
     price: number;
     changePct: number;
     above200: boolean;
+    /** False while SPY is under its 20-day or down 1.5%+ on the day: no new buys. */
+    buysAllowed: boolean;
     line: string;
   };
   scanned: number;

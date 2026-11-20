@@ -8,6 +8,12 @@ const MAX_RISK = 0.09;
 const MIN_RR = 1.8;
 /** A buy needs this much room from the live price to the target. */
 const MIN_UPSIDE = 0.08;
+/**
+ * A buy needs this much average daily dollar volume. Thinner names stay on the
+ * desk as a wait: their pullback buys kept failing (IART, CTS, SBH, PRGS, QNST,
+ * all $15–28M a day, in Nov 2026).
+ */
+const MIN_BUY_DOLLAR_VOL = 100_000_000;
 
 export type AnalyzeInput = {
   symbol: string;
@@ -340,6 +346,16 @@ export function analyze(input: AnalyzeInput): AnalyzeResult {
     holdTitle = "Not enough room to target";
     holdDetail = `This desk buys only when the target is at least ${Math.round(MIN_UPSIDE * 100)}% above the price paid. This one is ${room}%. Do not buy it for the move. If you already hold it, invalidation is still ${money(invalidation)} and the target is ${money(target)}.`;
     why = `${trendLine} The ${anchor} is tagged, but ${money(target)} is only ${room}% above ${money(live)}. A small gap is not a buy.`;
+  }
+
+  const dollarVol = vol20 * price;
+  if (stance === "buy" && dollarVol < MIN_BUY_DOLLAR_VOL) {
+    const traded = `$${Math.round(dollarVol / 1_000_000)} million`;
+    stance = "wait";
+    location = `The turn is at ${money(trigger)}, but only about ${traded} trades a day. Too thin to buy.`;
+    holdTitle = "Not enough volume";
+    holdDetail = `This desk buys only names that trade at least $${MIN_BUY_DOLLAR_VOL / 1_000_000} million a day. This one averages ${traded}. Thin pullbacks drift instead of turning. If you already hold it, invalidation is still ${money(invalidation)} and the target is ${money(target)}.`;
+    why = `${trendLine} The ${anchor} is tagged, but about ${traded} a day is too little volume to trust the turn.`;
   }
 
   return {
