@@ -1,6 +1,7 @@
 /** Builds the desk and the day book from Yahoo prices. Plain Node, no server framework, so a scheduled job can run it too. */
 
 import { analyze } from "./analyze";
+import { findDips } from "./dip";
 import { checkHeadlines } from "./news";
 import { analyzeSession, spySessionLine } from "./session";
 import type { Bar, DayBook, DayTrade, Desk, Plan, Reject } from "./types";
@@ -471,6 +472,7 @@ async function buildDesk(): Promise<Desk> {
   const plans: Plan[] = [];
   const rejected: Reject[] = [];
   const qualified: string[] = [];
+  const dipCharts: Array<{ symbol: string; name: string; bars: Bar[] }> = [];
   let charted = 0;
 
   for (const entry of BOOK) {
@@ -487,6 +489,7 @@ async function buildDesk(): Promise<Desk> {
     const marketCap = entry.shares * chart.price;
     if (marketCap >= 300_000_000 && chart.price >= 10) qualified.push(entry.symbol);
     const settled = completedDailyBars(chart.bars, now);
+    dipCharts.push({ symbol: entry.symbol, name: chart.name, bars: settled });
     const result = analyze({
       symbol: entry.symbol,
       name: chart.name,
@@ -545,6 +548,7 @@ async function buildDesk(): Promise<Desk> {
       : "pullbacks are still above their entry";
 
   return {
+    dips: findDips(dipCharts, spyBars),
     asOf: new Date().toISOString(),
     sessionLabel: sessionLabel(new Date()),
     summary: `${moverBuys} ${buyWord} in the pullback zone. ${moverWaits} ${waitWord}. Levels are locked to the last close.`,
@@ -598,7 +602,8 @@ export type AlertsPayload = {
       | "location"
     >
   >;
-  tape: Record<string, { price: number; bars: { t: number; h: number; l: number; c: number }[] }>;
+  tape: Record<string, { price: number; bars: { t: number; o: number; h: number; l: number; c: number }[] }>;
+  dips: Desk["dips"];
 };
 
 /**
@@ -643,8 +648,8 @@ export async function buildAlerts(watch: string[], desk?: Desk): Promise<AlertsP
     if (!chart) continue;
     tape[symbol] = {
       price: chart.bars[chart.bars.length - 1]!.c,
-      bars: chart.bars.map((bar) => ({ t: bar.t, h: bar.h, l: bar.l, c: bar.c })),
+      bars: chart.bars.map((bar) => ({ t: bar.t, o: bar.o, h: bar.h, l: bar.l, c: bar.c })),
     };
   }
-  return { asOf: source.asOf, buys, tape };
+  return { asOf: source.asOf, buys, tape, dips: source.dips };
 }

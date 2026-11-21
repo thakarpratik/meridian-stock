@@ -21,6 +21,19 @@
 import { get, put } from "@vercel/blob";
 
 import { type AlertsPayload, buildAlerts } from "./build";
+import { isSession, nyDay, nyMinutes, shortDay } from "./calendar";
+import { DIP_HOLD_SESSIONS, DIP_SLOTS } from "./dip";
+
+/**
+ * Pullback BUY pushes are off since 2026-11-20: the backtest showed no edge.
+ * Dip buys (./dip.ts) replace them. Open pullback positions still get their
+ * STOP and TARGET pushes.
+ */
+const PULLBACK_BUYS = false;
+/** Dip buys are pushed from 9:00 ET until this many minutes past midnight. */
+const DIP_BUY_UNTIL = 9 * 60 + 35;
+/** On the 10th session, the sell push goes out from this time. */
+const DIP_SELL_FROM = 15 * 60 + 30;
 
 type AlertBuy = AlertsPayload["buys"][number];
 type TapeBar = AlertsPayload["tape"][string]["bars"][number];
@@ -59,10 +72,21 @@ type Position = {
   openedAt: number;
 };
 
+type DipPosition = {
+  symbol: string;
+  name: string;
+  buyDay: string;
+  sellDay: string;
+  signalClose: number;
+  /** The buy day's opening price, filled in once the session opens. */
+  entry: number | null;
+};
+
 type State = {
   sent: Record<string, number>;
   watching: Record<string, Watch>;
   open: Record<string, Position>;
+  dips: Record<string, DipPosition>;
 };
 
 type Note = { title: string; message: string; priority?: number; tags?: string[] };
@@ -85,12 +109,14 @@ async function readState(): Promise<State> {
   const token = blobToken();
   try {
     const result = await get(STATE_PATH, { access: "private", useCache: false, ...(token ? { token } : {}) });
-    if (!result || result.statusCode !== 200 || !result.stream) return { sent: {}, watching: {}, open: {} };
+    if (!result || result.statusCode !== 200 || !result.stream) return { sent: {}, watching: {}, open: {}, dips: {} };
     const raw = JSON.parse(await new Response(result.stream).text()) as Partial<State>;
-    return { sent: raw.sent ?? {}, watching: raw.watching ?? {}, open: raw.open ?? {} };
+    return { sent: raw.sent ?? {}, watching: raw.watching ?? {}, open: raw.open ?? {}, dips: raw.dips ?? {} };
   } catch (error) {
     // A missing file is a first run; anything else must not double-push, so stop.
-    if (error instanceof Error && /not.?found|404/i.test(error.message)) return { sent: {}, watching: {}, open: {} };
+    if (error instanceof Error && /not.?found|404/i.test(error.message)) {
+      return { sent: {}, watching: {}, open: {}, dips: {} };
+    }
     throw error;
   }
 }
@@ -125,10 +151,16 @@ function nyParts(date: Date): Record<string, string> {
 }
 
 export function inRegularSession(now: Date): boolean {
-  const parts = nyParts(now);
-  if (parts.weekday === "Sat" || parts.weekday === "Sun") return false;
-  const mins = Number(parts.hour) * 60 + Number(parts.minute);
+  if (!isSession(nyDay(now))) return false;
+  const mins = nyMinutes(now);
   return mins >= 9 * 60 + 30 && mins < 16 * 60;
+}
+
+/** 9:00–9:29 ET on a trading day: dip buys go out before the open. */
+function inPreOpen(now: Date): boolean {
+  if (!isSession(nyDay(now))) return false;
+  const mins = nyMinutes(now);
+  return mins >= 9 * 60 && mins < 9 * 60 + 30;
 }
 
 /** Weekday sessions from the one containing `from` up to and including today's. */
@@ -248,6 +280,36 @@ function targetPush(position: Position, high: number, price: number): Note {
   };
 }
 
+function dipBuyPush(dip: AlertsPayload["dips"]["signals"][number], sellDay: string): Note {
+  return {
+    title: `DIP BUY ${dip.symbol} at the open`,
+    message: [
+      dip.name,
+      `Down ${Math.abs(dip.drop2Pct)}% in two days (RSI(2) ${dip.rsi2}) while in an uptrend. About $${dip.dollarVolM}M trades a day.`,
+      `Buy at today's open. Last close ${money(dip.close)}.`,
+      `Sell at the close on ${shortDay(sellDay)}, the ${DIP_HOLD_SESSIONS}th trading day. You will get a SELL alert that afternoon.`,
+      `The tested rule has no stop: it sells on day ${DIP_HOLD_SESSIONS} whatever happens. Size it so that is fine.`,
+    ].join("\n"),
+    tags: ["chart_with_downwards_trend"],
+  };
+}
+
+function dipSellPush(position: DipPosition, price: number | null, late: boolean): Note {
+  const change = position.entry && price ? pct(((price - position.entry) / position.entry) * 100) : null;
+  return {
+    title: late ? `SELL ${position.symbol} now (day ${DIP_HOLD_SESSIONS} passed)` : `SELL ${position.symbol} at today's close`,
+    message: [
+      position.name,
+      `Dip bought at the open on ${shortDay(position.buyDay)}${position.entry ? ` at ${money(position.entry)}` : ""}. Day ${DIP_HOLD_SESSIONS} is ${shortDay(position.sellDay)}.`,
+      price != null ? `Now ${money(price)}${change ? ` (${change})` : ""}.` : "",
+      late ? "The sell alert was missed on the day. Sell now." : "Sell before the close (market-on-close or a market order before 4:00).",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    tags: ["outbox_tray"],
+  };
+}
+
 /** Record setups another job already pushed, so they are not pushed again. */
 export async function markSent(entries: Record<string, number>): Promise<number> {
   const state = await readState();
@@ -267,21 +329,24 @@ let running = false;
 
 export async function runAlertJob({ force = false } = {}): Promise<JobResult> {
   const now = new Date();
-  if (!inRegularSession(now) && !force) return { skipped: "Outside the regular session.", log: [] };
+  if (!inRegularSession(now) && !inPreOpen(now) && !force) {
+    return { skipped: "Outside the regular session.", log: [] };
+  }
   if (!env("NTFY_TOPIC")) throw new Error("NTFY_TOPIC is not set on the server.");
   if (running) return { skipped: "A run is already in progress.", log: [] };
   running = true;
   try {
-    return await run(now);
+    return await run(now, inRegularSession(now) || (force && !inPreOpen(now)));
   } finally {
     running = false;
   }
 }
 
-async function run(now: Date): Promise<JobResult> {
+/** `live` is false before the open: only dip buys go out then. */
+async function run(now: Date, live: boolean): Promise<JobResult> {
   const log: string[] = [];
   const state = await readState();
-  const { sent, watching, open } = state;
+  const { sent, watching, open, dips: held } = state;
   let changed = false;
 
   for (const [key, at] of Object.entries(sent)) {
@@ -298,8 +363,9 @@ async function run(now: Date): Promise<JobResult> {
     }
   }
 
-  const extra = [...Object.values(watching), ...Object.values(open)].map((item) => item.symbol);
-  const { asOf, buys, tape } = await buildAlerts([...new Set(extra)]);
+  const extra = [...Object.values(held), ...Object.values(watching), ...Object.values(open)].map((item) => item.symbol);
+  const { asOf, buys: armed, tape, dips } = await buildAlerts([...new Set(extra)]);
+  const buys = PULLBACK_BUYS ? armed : [];
 
   const send = async (key: string, note: Note): Promise<boolean> => {
     try {
@@ -316,6 +382,65 @@ async function run(now: Date): Promise<JobResult> {
     open[key] = position;
     changed = true;
   };
+
+  const today = nyDay(now);
+  const mins = nyMinutes(now);
+
+  // 0. Dip buys, from 9:00 ET to just after the open, on the buy day only.
+  if (mins <= DIP_BUY_UNTIL && dips.buyDay === today && dips.sellDay) {
+    if (!dips.allowed) {
+      if (dips.signals.length) log.push(`Dip buys off (${dips.line}) Skipped ${dips.signals.map((d) => d.symbol).join(", ")}.`);
+    } else {
+      for (const dip of dips.signals) {
+        const key = `${dip.symbol}@${today}`;
+        if (held[key]) continue;
+        if (Object.keys(held).length >= DIP_SLOTS) {
+          log.push(`Dip ${dip.symbol}: all ${DIP_SLOTS} dip slots are full. Skipped.`);
+          continue;
+        }
+        if (Object.values(held).some((position) => position.symbol === dip.symbol)) continue;
+        if (await send(key, dipBuyPush(dip, dips.sellDay))) {
+          held[key] = {
+            symbol: dip.symbol,
+            name: dip.name,
+            buyDay: today,
+            sellDay: dips.sellDay,
+            signalClose: dip.close,
+            entry: null,
+          };
+          changed = true;
+          log.push(`Pushed DIP ${key}: RSI(2) ${dip.rsi2}, close ${money(dip.close)}, sell ${dips.sellDay}.`);
+        }
+      }
+    }
+  }
+
+  // 0b. Dip fills and day-10 sells.
+  for (const [key, position] of Object.entries(held)) {
+    const quote = tape[position.symbol];
+    if (live && position.entry == null && quote) {
+      const first = quote.bars.find((bar) => nyDay(bar.t) === position.buyDay);
+      if (first) {
+        position.entry = Math.round(first.o * 100) / 100;
+        changed = true;
+        log.push(`Dip ${key}: opened at ${money(position.entry)}.`);
+      }
+    }
+    const late = today > position.sellDay;
+    if (!late && !(live && today === position.sellDay && mins >= DIP_SELL_FROM)) continue;
+    if (await send(key, dipSellPush(position, quote?.price ?? null, late))) {
+      delete held[key];
+      changed = true;
+      const result = position.entry && quote ? ` (${pct(((quote.price - position.entry) / position.entry) * 100)})` : "";
+      log.push(`SELL DIP ${key} at ${money(quote?.price)}${result}.`);
+    }
+  }
+
+  if (!live) {
+    log.push(`Before the open: ${dips.signals.length} dip signals, ${Object.keys(held).length} dip positions.`);
+    if (changed) await writeState(state);
+    return { log };
+  }
 
   // 1. Stops and targets on open positions.
   for (const [key, position] of Object.entries(open)) {
@@ -432,7 +557,7 @@ async function run(now: Date): Promise<JobResult> {
   }
 
   log.push(
-    `${buys.length} armed buys, ${Object.keys(watching).length} waiting for a bounce, ${Object.keys(open).length} open with a stop.`,
+    `${Object.keys(held).length} dip positions, ${armed.length} pullback buys (not pushed), ${Object.keys(watching).length} waiting for a bounce, ${Object.keys(open).length} open with a stop.`,
   );
   if (changed) await writeState(state);
   return { log };
