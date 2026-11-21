@@ -1,6 +1,7 @@
 /** Builds the desk and the day book from Yahoo prices. Plain Node, no server framework, so a scheduled job can run it too. */
 
 import { analyze } from "./analyze";
+import { findDips } from "./dip";
 import { checkHeadlines } from "./news";
 import { analyzeSession, spySessionLine } from "./session";
 import type { Bar, DayBook, DayTrade, Desk, Plan, Reject } from "./types";
@@ -9,6 +10,8 @@ import { BOOK } from "./universe";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const TTL_MS = 10 * 60 * 1000;
+/** SPY down this much (percent) on the day blocks new buys, like SPY under its 20-day. */
+const SPY_DAY_DROP = 1.5;
 
 type ChartPack = {
   bars: Bar[];
@@ -435,29 +438,41 @@ async function buildDesk(): Promise<Desk> {
     price: 0,
     changePct: 0,
     above200: false,
-    line: "SPY could not be read. Treat every long with extra doubt.",
+    buysAllowed: false,
+    line: "SPY could not be read. No new buys until it can.",
   };
   const spyBars = spy ? completedDailyBars(spy.bars, now) : [];
   if (spy && spyBars.length > 200) {
     const closes = spyBars.map((bar) => bar.c);
     const end = closes.length - 1;
-    let sum = 0;
-    for (let i = end - 199; i <= end; i++) sum += closes[i]!;
-    const sma200 = sum / 200;
+    const mean = (n: number) => closes.slice(end - n + 1, end + 1).reduce((sum, c) => sum + c, 0) / n;
+    const sma200 = mean(200);
+    const sma20 = mean(20);
     const above = spy.price > sma200;
+    const under20 = spy.price < sma20;
+    const selling = spy.changePct <= -SPY_DAY_DROP;
+    const buysAllowed = !under20 && !selling;
+    const trend200 = above
+      ? `SPY is above its 200-day ($${sma200.toFixed(0)}).`
+      : `SPY is under its 200-day ($${sma200.toFixed(0)}).`;
+    const gate = selling
+      ? `It is down ${Math.abs(spy.changePct).toFixed(1)}% today. No new buys on a selling day.`
+      : under20
+        ? `It is under its 20-day ($${sma20.toFixed(0)}), so the short-term trend is down. No new buys until it is back above.`
+        : `It is above its 20-day ($${sma20.toFixed(0)}). Swing longs are allowed.`;
     tape = {
       price: Math.round(spy.price * 100) / 100,
       changePct: Math.round(spy.changePct * 100) / 100,
       above200: above,
-      line: above
-        ? `SPY is above its 200-day ($${sma200.toFixed(0)}). Swing longs are allowed.`
-        : `SPY is under its 200-day ($${sma200.toFixed(0)}). The tape is a headwind — demand a cleaner trigger.`,
+      buysAllowed,
+      line: `${trend200} ${gate}`,
     };
   }
 
   const plans: Plan[] = [];
   const rejected: Reject[] = [];
   const qualified: string[] = [];
+  const dipCharts: Array<{ symbol: string; name: string; bars: Bar[] }> = [];
   let charted = 0;
 
   for (const entry of BOOK) {
@@ -474,6 +489,7 @@ async function buildDesk(): Promise<Desk> {
     const marketCap = entry.shares * chart.price;
     if (marketCap >= 300_000_000 && chart.price >= 10) qualified.push(entry.symbol);
     const settled = completedDailyBars(chart.bars, now);
+    dipCharts.push({ symbol: entry.symbol, name: chart.name, bars: settled });
     const result = analyze({
       symbol: entry.symbol,
       name: chart.name,
@@ -495,6 +511,17 @@ async function buildDesk(): Promise<Desk> {
 
   if (plans.length < 15) {
     throw new Error("Not enough prices came back to build the desk. Try refresh.");
+  }
+
+  if (!tape.buysAllowed) {
+    for (const plan of plans) {
+      if (plan.stance !== "buy") continue;
+      plan.stance = "wait";
+      plan.location = `The turn is at $${plan.trigger?.toFixed(2)}, but the market is falling. No new buys today.`;
+      plan.holdTitle = "Market blocks the buy";
+      plan.holdDetail = `${tape.line} Pullback buys fail together in a falling market. If you already hold it, invalidation is still $${plan.invalidation.toFixed(2)}.`;
+      plan.why = tape.line;
+    }
   }
 
   const chartBuys = plans.filter((plan) => plan.stance === "buy" && plan.move !== "steady");
@@ -521,6 +548,7 @@ async function buildDesk(): Promise<Desk> {
       : "pullbacks are still above their entry";
 
   return {
+    dips: findDips(dipCharts, spyBars),
     asOf: new Date().toISOString(),
     sessionLabel: sessionLabel(new Date()),
     summary: `${moverBuys} ${buyWord} in the pullback zone. ${moverWaits} ${waitWord}. Levels are locked to the last close.`,
@@ -574,7 +602,8 @@ export type AlertsPayload = {
       | "location"
     >
   >;
-  tape: Record<string, { price: number; bars: { t: number; h: number; l: number; c: number }[] }>;
+  tape: Record<string, { price: number; bars: { t: number; o: number; h: number; l: number; c: number }[] }>;
+  dips: Desk["dips"];
 };
 
 /**
@@ -619,8 +648,8 @@ export async function buildAlerts(watch: string[], desk?: Desk): Promise<AlertsP
     if (!chart) continue;
     tape[symbol] = {
       price: chart.bars[chart.bars.length - 1]!.c,
-      bars: chart.bars.map((bar) => ({ t: bar.t, h: bar.h, l: bar.l, c: bar.c })),
+      bars: chart.bars.map((bar) => ({ t: bar.t, o: bar.o, h: bar.h, l: bar.l, c: bar.c })),
     };
   }
-  return { asOf: source.asOf, buys, tape };
+  return { asOf: source.asOf, buys, tape, dips: source.dips };
 }
