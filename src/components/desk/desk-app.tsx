@@ -7,7 +7,8 @@ import { cn } from "@/lib/cn";
 import { compactCap, money, moveLabel, positionCall, signedPct, stanceLabel, tierLabel, travelLabel } from "@/lib/desk/format";
 import { loadDay, loadDesk } from "@/lib/desk/load";
 import { sessionClockLine } from "@/lib/desk/session";
-import type { DayTrade, Desk, Plan, Stance } from "@/lib/desk/types";
+import { shortDay } from "@/lib/desk/calendar";
+import type { DayTrade, Desk, DipBook, Plan, Stance, StrengthBook } from "@/lib/desk/types";
 
 const FILTERS = [
   { id: "picks", label: "Top 5" },
@@ -381,20 +382,26 @@ export function DeskApp({ initial }: { initial: Desk }) {
               />
             ))
           )
-        ) : visible.length === 0 ? (
-          <Empty filter={filter} lookup={lookup} query={q} />
         ) : (
-          visible.map((plan, index) => (
-            <PlanCard
-              key={plan.symbol}
-              plan={plan}
-              holding={holdSet.has(plan.symbol)}
-              expanded={open === plan.symbol}
-              rank={filter === "picks" ? index + 1 : undefined}
-              onToggle={() => setOpen((current) => (current === plan.symbol ? null : plan.symbol))}
-              onHold={() => toggleHold(plan.symbol)}
-            />
-          ))
+          <>
+            {desk.strength ? <StrengthPanel book={desk.strength} /> : null}
+            {desk.dips ? <DipPanel dips={desk.dips} /> : null}
+            {visible.length === 0 ? (
+              <Empty filter={filter} lookup={lookup} query={q} />
+            ) : (
+              visible.map((plan, index) => (
+                <PlanCard
+                  key={plan.symbol}
+                  plan={plan}
+                  holding={holdSet.has(plan.symbol)}
+                  expanded={open === plan.symbol}
+                  rank={filter === "picks" ? index + 1 : undefined}
+                  onToggle={() => setOpen((current) => (current === plan.symbol ? null : plan.symbol))}
+                  onHold={() => toggleHold(plan.symbol)}
+                />
+              ))
+            )}
+          </>
         )}
       </section>
 
@@ -448,6 +455,116 @@ function Count({
         {value}
       </dd>
     </div>
+  );
+}
+
+function StrengthPanel({ book }: { book: StrengthBook }) {
+  const sectors = new Map<string, number>();
+  for (const pick of book.picks) sectors.set(pick.sector, (sectors.get(pick.sector) ?? 0) + 1);
+  const crowded = [...sectors].filter(([, n]) => n >= 4);
+  return (
+    <section aria-label="Strength picks" className="rounded-xl bg-card px-4 py-4 ring-1 ring-border sm:px-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-lg text-foreground">Strength picks</h2>
+        {book.asOfDay ? <p className="text-xs text-muted-foreground">Ranked on the close of {shortDay(book.asOfDay)}</p> : null}
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        The 10 biggest 12-month gainers (skipping the last month) among stocks over $10 that trade $100M+ a day. Hold
+        equal amounts. Every Monday at 9:00 ET a phone alert lists what to sell and what to buy at the open.
+      </p>
+      {book.picks.length === 0 ? (
+        <p className="mt-3 text-sm text-foreground">The ranking could not be built from today's prices.</p>
+      ) : (
+        <ol className="mt-3 divide-y divide-border">
+          {book.picks.map((pick, index) => (
+            <li key={pick.symbol} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
+              <div className="min-w-0">
+                <span className="mr-2 text-sm text-muted-foreground tabular-nums">{index + 1}</span>
+                <span className="font-medium text-foreground">{pick.symbol}</span>{" "}
+                <span className="text-sm text-muted-foreground">{pick.sector}</span>
+              </div>
+              <div className="flex gap-4 text-sm tabular-nums">
+                <span className="text-foreground">{money(pick.close)}</span>
+                <span className="text-up">{signedPct(pick.gain12m1Pct)} 12m</span>
+                <span className={pick.gain1mPct >= 0 ? "text-muted-foreground" : "text-down"}>
+                  {signedPct(pick.gain1mPct)} 1m
+                </span>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {book.next.length ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Next in line: {book.next.map((pick) => pick.symbol).join(", ")}.
+        </p>
+      ) : null}
+      {crowded.length ? (
+        <p className="mt-2 text-sm text-down">
+          {crowded.map(([sector, n]) => `${n} of 10 are ${sector}`).join("; ")}. One bad week for that group hits the
+          whole list.
+        </p>
+      ) : null}
+      <p className="mt-3 text-xs text-muted-foreground">
+        Backtest Dec 2022–2025: 33.5% a year against SPY's 18.3%; 2026: +16% against +1%. Worst drop about −41%, more
+        than twice SPY's. The test used today's stock list, which flatters this strategy. Not a guarantee.
+      </p>
+    </section>
+  );
+}
+
+function DipPanel({ dips }: { dips: DipBook }) {
+  const when =
+    dips.buyDay && dips.sellDay
+      ? `Buy at the open on ${shortDay(dips.buyDay)}. Sell at the close on ${shortDay(dips.sellDay)}, the 10th trading day.`
+      : null;
+  return (
+    <section
+      aria-label="Dip buys"
+      className="rounded-xl bg-card px-4 py-4 ring-1 ring-border sm:px-5"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-lg text-foreground">Dip buys</h2>
+        {dips.signalDay ? (
+          <p className="text-xs text-muted-foreground">From the close on {shortDay(dips.signalDay)}</p>
+        ) : null}
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        A sharp two-day drop (RSI(2) under 10) in a stock that is trending up and trades $100M+ a day. Phone
+        alerts go out at 9:00 ET, deepest dip first, up to 10 at a time.
+      </p>
+      <p className={cn("mt-2 text-sm", dips.allowed ? "text-foreground" : "text-down")}>{dips.line}</p>
+      {dips.signals.length === 0 ? (
+        <p className="mt-3 text-sm text-foreground">No dip signals from the last close.</p>
+      ) : (
+        <>
+          {when ? (
+            <p className="mt-3 text-sm text-foreground">
+              {dips.allowed ? when : "Shown for reference only. No buy while the market filter is off."}
+            </p>
+          ) : null}
+          <ul className="mt-3 divide-y divide-border">
+            {dips.signals.map((dip) => (
+              <li key={dip.symbol} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
+                <div className="min-w-0">
+                  <span className="font-medium text-foreground">{dip.symbol}</span>{" "}
+                  <span className="text-sm text-muted-foreground">{dip.name}</span>
+                </div>
+                <div className="flex gap-4 text-sm tabular-nums">
+                  <span className="text-foreground">{money(dip.close)}</span>
+                  <span className="text-down">{signedPct(dip.drop2Pct)} 2d</span>
+                  <span className="text-muted-foreground">RSI {dip.rsi2}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <p className="mt-3 text-xs text-muted-foreground">
+        No stop: the tested rule sells on day 10 whatever happens. Backtest 2022–2025: 6% a year against SPY's 18%;
+        2026: +18% against SPY's +1%. Not a proven edge. Size small.
+      </p>
+    </section>
   );
 }
 

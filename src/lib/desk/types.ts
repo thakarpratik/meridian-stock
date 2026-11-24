@@ -88,7 +88,52 @@ export type Reject = {
   reason: string;
 };
 
+export type DipSignal = {
+  symbol: string;
+  name: string;
+  close: number;
+  rsi2: number;
+  /** Change over the last two sessions, in percent. */
+  drop2Pct: number;
+  dollarVolM: number;
+};
+
+export type DipBook = {
+  /** SPY closed at or above its 20-day. */
+  allowed: boolean;
+  line: string;
+  /** The close the signals are from, and the days to buy and sell. */
+  signalDay: string | null;
+  buyDay: string | null;
+  sellDay: string | null;
+  /** Deepest dip first. Shown even when not allowed. */
+  signals: DipSignal[];
+};
+
+export type StrengthPick = {
+  symbol: string;
+  name: string;
+  sector: string;
+  close: number;
+  /** Gain from a year ago to a month ago, in percent: the ranking score. */
+  gain12m1Pct: number;
+  /** Gain over the last month, in percent. Not part of the score. */
+  gain1mPct: number;
+  dollarVolM: number;
+};
+
+export type StrengthBook = {
+  /** The close the ranking is from. */
+  asOfDay: string | null;
+  /** The top 10, strongest first. */
+  picks: StrengthPick[];
+  /** The next 5, closest to entering. */
+  next: StrengthPick[];
+};
+
 export type Desk = {
+  dips: DipBook;
+  strength: StrengthBook;
   asOf: string;
   sessionLabel: string;
   summary: string;
@@ -96,6 +141,8 @@ export type Desk = {
     price: number;
     changePct: number;
     above200: boolean;
+    /** False while SPY is under its 20-day or down 1.5%+ on the day: no new buys. */
+    buysAllowed: boolean;
     line: string;
   };
   scanned: number;
