@@ -57,6 +57,19 @@ export function nextSession(ymd: string): string {
   return day;
 }
 
+/** The last trading day before `ymd`. */
+export function prevSession(ymd: string): string {
+  let day = shift(ymd, -1);
+  while (!isSession(day)) day = shift(day, -1);
+  return day;
+}
+
+/** The Monday of the week holding `ymd`. */
+export function weekStart(ymd: string): string {
+  const weekday = new Date(`${ymd}T12:00:00Z`).getUTCDay();
+  return shift(ymd, -((weekday + 6) % 7));
+}
+
 /** The trading day `n` sessions after `ymd` (n = 0 returns `ymd`). */
 export function addSessions(ymd: string, n: number): string {
   let day = ymd;

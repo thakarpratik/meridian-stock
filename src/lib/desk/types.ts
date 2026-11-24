@@ -110,8 +110,30 @@ export type DipBook = {
   signals: DipSignal[];
 };
 
+export type StrengthPick = {
+  symbol: string;
+  name: string;
+  sector: string;
+  close: number;
+  /** Gain from a year ago to a month ago, in percent: the ranking score. */
+  gain12m1Pct: number;
+  /** Gain over the last month, in percent. Not part of the score. */
+  gain1mPct: number;
+  dollarVolM: number;
+};
+
+export type StrengthBook = {
+  /** The close the ranking is from. */
+  asOfDay: string | null;
+  /** The top 10, strongest first. */
+  picks: StrengthPick[];
+  /** The next 5, closest to entering. */
+  next: StrengthPick[];
+};
+
 export type Desk = {
   dips: DipBook;
+  strength: StrengthBook;
   asOf: string;
   sessionLabel: string;
   summary: string;

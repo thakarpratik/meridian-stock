@@ -21,8 +21,9 @@
 import { get, put } from "@vercel/blob";
 
 import { type AlertsPayload, buildAlerts } from "./build";
-import { isSession, nyDay, nyMinutes, shortDay } from "./calendar";
+import { isSession, nyDay, nyMinutes, prevSession, shortDay, weekStart } from "./calendar";
 import { DIP_HOLD_SESSIONS, DIP_SLOTS } from "./dip";
+import { STRENGTH_COUNT } from "./strength";
 
 /**
  * Pullback BUY pushes are off since 2026-11-20: the backtest showed no edge.
@@ -82,11 +83,15 @@ type DipPosition = {
   entry: number | null;
 };
 
+/** The strength list as of the last weekly rebalance push. */
+type StrengthHeld = { week: string; holdings: string[] };
+
 type State = {
   sent: Record<string, number>;
   watching: Record<string, Watch>;
   open: Record<string, Position>;
   dips: Record<string, DipPosition>;
+  strength?: StrengthHeld;
 };
 
 type Note = { title: string; message: string; priority?: number; tags?: string[] };
@@ -111,7 +116,13 @@ async function readState(): Promise<State> {
     const result = await get(STATE_PATH, { access: "private", useCache: false, ...(token ? { token } : {}) });
     if (!result || result.statusCode !== 200 || !result.stream) return { sent: {}, watching: {}, open: {}, dips: {} };
     const raw = JSON.parse(await new Response(result.stream).text()) as Partial<State>;
-    return { sent: raw.sent ?? {}, watching: raw.watching ?? {}, open: raw.open ?? {}, dips: raw.dips ?? {} };
+    return {
+      sent: raw.sent ?? {},
+      watching: raw.watching ?? {},
+      open: raw.open ?? {},
+      dips: raw.dips ?? {},
+      ...(raw.strength ? { strength: raw.strength } : {}),
+    };
   } catch (error) {
     // A missing file is a first run; anything else must not double-push, so stop.
     if (error instanceof Error && /not.?found|404/i.test(error.message)) {
@@ -310,6 +321,43 @@ function dipSellPush(position: DipPosition, price: number | null, late: boolean)
   };
 }
 
+function strengthPush(book: AlertsPayload["strength"], held: string[] | null): Note {
+  const now = book.picks.map((pick) => pick.symbol);
+  const label = (symbol: string) => {
+    const pick = book.picks.find((item) => item.symbol === symbol)!;
+    return `${symbol} (${pick.sector}, +${pick.gain12m1Pct}% in 12 months)`;
+  };
+  if (!held) {
+    return {
+      title: `STRENGTH: buy these ${now.length} at the open`,
+      message: [
+        `First week. Buy equal amounts of each:`,
+        ...now.map(label),
+        `Every Monday you will get the list of what to sell and what to buy, so you always hold the ${STRENGTH_COUNT} strongest.`,
+        `Expect deep drops: about −41% at worst in the backtest, more than twice SPY's.`,
+      ].join("\n"),
+      tags: ["trophy"],
+    };
+  }
+  const buys = now.filter((symbol) => !held.includes(symbol));
+  const sells = held.filter((symbol) => !now.includes(symbol));
+  const keeps = now.filter((symbol) => held.includes(symbol));
+  return {
+    title: buys.length
+      ? `STRENGTH weekly: sell ${sells.length}, buy ${buys.length} at the open`
+      : `STRENGTH weekly: no changes`,
+    message: [
+      sells.length ? `SELL: ${sells.join(", ")} (left the top ${STRENGTH_COUNT}).` : "",
+      buys.length ? `BUY with that money, equal amounts:\n${buys.map(label).join("\n")}` : "",
+      keeps.length ? `KEEP: ${keeps.join(", ")}.` : "",
+      buys.length ? "" : `Hold all ${STRENGTH_COUNT}. Nothing to trade this week.`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    tags: ["trophy"],
+  };
+}
+
 /** Record setups another job already pushed, so they are not pushed again. */
 export async function markSent(entries: Record<string, number>): Promise<number> {
   const state = await readState();
@@ -364,7 +412,7 @@ async function run(now: Date, live: boolean): Promise<JobResult> {
   }
 
   const extra = [...Object.values(held), ...Object.values(watching), ...Object.values(open)].map((item) => item.symbol);
-  const { asOf, buys: armed, tape, dips } = await buildAlerts([...new Set(extra)]);
+  const { asOf, buys: armed, tape, dips, strength } = await buildAlerts([...new Set(extra)]);
   const buys = PULLBACK_BUYS ? armed : [];
 
   const send = async (key: string, note: Note): Promise<boolean> => {
@@ -412,6 +460,23 @@ async function run(now: Date, live: boolean): Promise<JobResult> {
           log.push(`Pushed DIP ${key}: RSI(2) ${dip.rsi2}, close ${money(dip.close)}, sell ${dips.sellDay}.`);
         }
       }
+    }
+  }
+
+  // 0a. Weekly strength rebalance, on the week's first run in the buy window,
+  // from a ranking on the last close.
+  const week = weekStart(today);
+  if (
+    mins <= DIP_BUY_UNTIL &&
+    state.strength?.week !== week &&
+    strength.asOfDay === prevSession(today) &&
+    strength.picks.length === STRENGTH_COUNT
+  ) {
+    const heldBefore = state.strength?.holdings ?? null;
+    if (await send(`strength@${week}`, strengthPush(strength, heldBefore))) {
+      state.strength = { week, holdings: strength.picks.map((pick) => pick.symbol) };
+      changed = true;
+      log.push(`Pushed STRENGTH ${week}: ${state.strength.holdings.join(", ")}.`);
     }
   }
 
