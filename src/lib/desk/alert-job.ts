@@ -331,10 +331,10 @@ function strengthPush(book: AlertsPayload["strength"], held: string[] | null): N
     return {
       title: `STRENGTH: buy these ${now.length} at the open`,
       message: [
-        `First week. Buy equal amounts of each:`,
+        `First week. Buy equal amounts of each (one per sector):`,
         ...now.map(label),
         `Every Monday you will get the list of what to sell and what to buy, so you always hold the ${STRENGTH_COUNT} strongest.`,
-        `Expect deep drops: about −41% at worst in the backtest, more than twice SPY's.`,
+        `Expect deep drops: about −52% at worst in the backtest, nearly three times SPY's.`,
       ].join("\n"),
       tags: ["trophy"],
     };
