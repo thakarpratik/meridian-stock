@@ -8,7 +8,7 @@ import { compactCap, money, moveLabel, positionCall, signedPct, stanceLabel, tie
 import { loadDay, loadDesk } from "@/lib/desk/load";
 import { sessionClockLine } from "@/lib/desk/session";
 import { shortDay } from "@/lib/desk/calendar";
-import type { DayTrade, Desk, DipBook, Plan, Stance, StrengthBook } from "@/lib/desk/types";
+import type { DayTrade, Desk, DipBook, Plan, Stance, StrengthBook, StrengthPick } from "@/lib/desk/types";
 
 const FILTERS = [
   { id: "picks", label: "Top 5" },
@@ -458,10 +458,27 @@ function Count({
   );
 }
 
+function StrengthRow({ pick, rank, dim = false }: { pick: StrengthPick; rank: number; dim?: boolean }) {
+  return (
+    <li className={cn("flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2", dim && "opacity-70")}>
+      <div className="min-w-0">
+        <span className="mr-2 text-sm text-muted-foreground tabular-nums">{rank}</span>
+        <span className="font-medium text-foreground">{pick.symbol}</span>{" "}
+        <span className="text-sm text-muted-foreground">{pick.sector}</span>
+      </div>
+      <div className="flex gap-4 text-sm tabular-nums">
+        <span className="text-foreground">{money(pick.close)}</span>
+        <span className="text-up">{signedPct(pick.gain12m1Pct)} 12m</span>
+        <span className={pick.gain1mPct >= 0 ? "text-muted-foreground" : "text-down"}>
+          {signedPct(pick.gain1mPct)} 1m
+        </span>
+      </div>
+    </li>
+  );
+}
+
 function StrengthPanel({ book }: { book: StrengthBook }) {
-  const sectors = new Map<string, number>();
-  for (const pick of book.picks) sectors.set(pick.sector, (sectors.get(pick.sector) ?? 0) + 1);
-  const crowded = [...sectors].filter(([, n]) => n >= 4);
+  const held = new Set(book.picks.map((pick) => pick.symbol));
   return (
     <section aria-label="Strength picks" className="rounded-xl bg-card px-4 py-4 ring-1 ring-border sm:px-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -469,46 +486,39 @@ function StrengthPanel({ book }: { book: StrengthBook }) {
         {book.asOfDay ? <p className="text-xs text-muted-foreground">Ranked on the close of {shortDay(book.asOfDay)}</p> : null}
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        The 10 biggest 12-month gainers (skipping the last month) among stocks over $10 that trade $100M+ a day. Hold
-        equal amounts. Every Monday at 9:00 ET a phone alert lists what to sell and what to buy at the open.
+        Hold these 3 in equal amounts: the biggest 12-month gainers (skipping the last month), at most one per sector,
+        among stocks over $10 that trade $100M+ a day. Every Monday at 9:00 ET a phone alert says what to sell and
+        what to buy at the open.
       </p>
       {book.picks.length === 0 ? (
         <p className="mt-3 text-sm text-foreground">The ranking could not be built from today's prices.</p>
       ) : (
         <ol className="mt-3 divide-y divide-border">
           {book.picks.map((pick, index) => (
-            <li key={pick.symbol} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
-              <div className="min-w-0">
-                <span className="mr-2 text-sm text-muted-foreground tabular-nums">{index + 1}</span>
-                <span className="font-medium text-foreground">{pick.symbol}</span>{" "}
-                <span className="text-sm text-muted-foreground">{pick.sector}</span>
-              </div>
-              <div className="flex gap-4 text-sm tabular-nums">
-                <span className="text-foreground">{money(pick.close)}</span>
-                <span className="text-up">{signedPct(pick.gain12m1Pct)} 12m</span>
-                <span className={pick.gain1mPct >= 0 ? "text-muted-foreground" : "text-down"}>
-                  {signedPct(pick.gain1mPct)} 1m
-                </span>
-              </div>
-            </li>
+            <StrengthRow key={pick.symbol} pick={pick} rank={index + 1} />
           ))}
         </ol>
       )}
       {book.next.length ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          Next in line: {book.next.map((pick) => pick.symbol).join(", ")}.
-        </p>
-      ) : null}
-      {crowded.length ? (
-        <p className="mt-2 text-sm text-down">
-          {crowded.map(([sector, n]) => `${n} of 10 are ${sector}`).join("; ")}. One bad week for that group hits the
-          whole list.
+          Next in line: {book.next.map((pick) => `${pick.symbol} (${pick.sector})`).join(", ")}.
         </p>
       ) : null}
       <p className="mt-3 text-xs text-muted-foreground">
-        Backtest Dec 2022–2025: 33.5% a year against SPY's 18.3%; 2026: +16% against +1%. Worst drop about −41%, more
-        than twice SPY's. The test used today's stock list, which flatters this strategy. Not a guarantee.
+        Backtest Dec 2022–2025: 42% a year against SPY's 18.3%; 2026: +70% against +1%. Worst drop about −52%, nearly
+        three times SPY's. With only 3 stocks, a few winners drive the result, and the test used today's stock list,
+        which flatters it. Not a guarantee.
       </p>
+      {book.top10?.length ? (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm text-foreground">Full top 10, any sector (reference)</summary>
+          <ol className="mt-2 divide-y divide-border">
+            {book.top10.map((pick, index) => (
+              <StrengthRow key={pick.symbol} pick={pick} rank={index + 1} dim={!held.has(pick.symbol)} />
+            ))}
+          </ol>
+        </details>
+      ) : null}
     </section>
   );
 }

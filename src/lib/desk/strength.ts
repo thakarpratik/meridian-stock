@@ -1,20 +1,22 @@
 /**
- * Strength picks: the 10 stocks with the biggest 12-month gain, skipping the
- * most recent month ("12-1 momentum"). Rebalanced weekly: on the first
- * trading day of each week, buy what entered the top 10 and sell what left.
+ * Strength picks: the 3 stocks with the biggest 12-month gain, skipping the
+ * most recent month ("12-1 momentum"), at most one per sector. Rebalanced
+ * weekly: on the first trading day of each week, buy what entered and sell
+ * what left.
  *
  * Eligible: $10+ and $100M+ average daily dollar volume. No market filter: in
  * the backtest the SPY 20-day filter hurt this strategy.
  *
  * Backtest (Dec 2022 – Nov 2026, today's universe, next-day trading, 0.1%
- * costs, median of 5 start days): 33.5%/yr in 2022–2025 against SPY's 18.3%,
- * and +16% in 2026 against +1%. Worst drop about −41% against SPY's −19%.
- * Today's universe makes momentum look better than it was.
+ * costs, median of 5 start days): 42%/yr in 2022–2025 (range 38–57%) against
+ * SPY's 18.3%, and +70% in 2026 (range 50–89%) against +1%. Worst drop about
+ * −52% against SPY's −19%. Today's universe makes this look better than it
+ * was, and more so with only 3 stocks.
  */
 import { nyDay } from "./calendar";
 import type { Bar, StrengthBook, StrengthPick } from "./types";
 
-export const STRENGTH_COUNT = 10;
+export const STRENGTH_COUNT = 3;
 const MIN_PRICE = 10;
 const MIN_DOLLAR_VOL = 100_000_000;
 const LOOKBACK = 252;
@@ -67,5 +69,13 @@ export function rankStrength(
     return nyDay(chart.bars[chart.bars.length - 1]!.t) === asOfDay;
   });
   fresh.sort((a, b) => b.gain12m1Pct - a.gain12m1Pct);
-  return { asOfDay, picks: fresh.slice(0, STRENGTH_COUNT), next: fresh.slice(STRENGTH_COUNT, STRENGTH_COUNT + 5) };
+  // The strongest stock of each sector, strongest sector leader first.
+  const leaders: StrengthPick[] = [];
+  for (const pick of fresh) if (!leaders.some((item) => item.sector === pick.sector)) leaders.push(pick);
+  return {
+    asOfDay,
+    picks: leaders.slice(0, STRENGTH_COUNT),
+    next: leaders.slice(STRENGTH_COUNT, STRENGTH_COUNT + 3),
+    top10: fresh.slice(0, 10),
+  };
 }

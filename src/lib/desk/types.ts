@@ -125,10 +125,12 @@ export type StrengthPick = {
 export type StrengthBook = {
   /** The close the ranking is from. */
   asOfDay: string | null;
-  /** The top 10, strongest first. */
+  /** The 3 to hold: the strongest stock of each of the 3 strongest-led sectors. */
   picks: StrengthPick[];
-  /** The next 5, closest to entering. */
+  /** The next sector leaders, closest to entering. */
   next: StrengthPick[];
+  /** The plain top 10 by the same score, any sector, for reference. */
+  top10: StrengthPick[];
 };
 
 export type Desk = {
